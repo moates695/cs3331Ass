@@ -8,7 +8,7 @@ Author: Marcus Oates, z5257541
 import sys
 from socket import *
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Event
 from helper import *
 from time import sleep
 
@@ -17,6 +17,14 @@ attempts = None
 
 def printBreak():
     print(f"{'='*40}")
+
+# send message and catch broken pipe + logout user
+def send(clientSocket, clientHost, cmd, message):
+    fullMessage = cmd + "~" + message + "|"
+    try:
+        clientSocket.send(fullMessage.encode())
+    except IOError:
+        print(f"Broken pipe. User logged out: {clientHost}")
 
 def write2UserLog(username, clientIP, clientPort):
     try:
@@ -39,14 +47,16 @@ def write2UserLog(username, clientIP, clientPort):
         exit()
 
 class BlockLoginThread(Thread):
-    def __init__(self, username):
+    def __init__(self, username, clientHost):
         Thread.__init__(self)
         self.username = username
+        self.clientHost = clientHost
 
     def run(self):
         global invalidLogins
         sleep(10)
         invalidLogins[self.username] = 0
+        print(f"User login unblocked: {self.clientHost}")
 
 class ClientThread(Thread):
     def __init__(self, clientSocket, clientAddr):
@@ -54,11 +64,12 @@ class ClientThread(Thread):
         self.clientSocket = clientSocket
         self.clientAddr = clientAddr
         self.clientActive = True
-        print(f"Connection established with: {self.clientAddr}")
+        print(f"+ Connection established with: {self.clientAddr[0]}")
 
     def run(self):
-        self.login()
-
+        if self.login():
+            self.body()
+        
     def login(self):
         global invalidLogins
         self.clientSocket.send("INPUT~Username: ".encode())
@@ -73,37 +84,63 @@ class ClientThread(Thread):
                     line = file.readline()
                     # username does not exist
                     if not line:
-                        self.clientSocket.send("LINE~Username does not exist".encode())
-                        break
-                    # username does not match given username
+                        #self.clientSocket.send("LINE~Username does not exist|".encode())
+                        message = "Username does not exist"
+                        send(self.clientSocket, self.clientAddr, "LINE", message)
+                        print(f"Invalid username provided: {self.clientAddr[0]}")
+                        return self.login()
+                    # read username does not match given username
                     if line.split()[0] != username:
                         continue
                     # user is currently locked out
                     if invalidLogins[username] == attempts:
-                        self.clientSocket.send("LINE~Your account is blocked due to multiple login failures. Please try again later".encode())
-                        break
+                        self.clientSocket.send("LINE~Your account is blocked due to multiple login failures. Please try again later|".encode())
+                        print(f"Login attempt while blocked: {self.clientAddr[0]}")
+                        self.clientSocket.send("COMMAND~killClient|")
+                        #break
+                        return False
                     # password is valid
                     if line.split()[1] == password:
                         invalidLogins[username] = 0
-                        self.clientSocket.send("LINE~Welcome to Toom!".encode())
-                        self.clientSocket.send("COMMAND~sendUDPSocket".encode())
+                        self.clientSocket.send("COMMAND~sendUDPSocket|".encode())
                         clientPort = int(self.clientSocket.recv(1024).decode())
                         write2UserLog(username, self.clientAddr[0], clientPort)
-                        break
+                        print(f"User login processed: {self.clientAddr[0]}")
+                        self.clientSocket.send("LINE~Welcome to Toom!|".encode())
+                        #break
+                        return True
                     # password is invalid
                     else:
                         invalidLogins[username] += 1
+                        print(f"Invalid password entered: {self.clientAddr[0]}")
                         if invalidLogins[username] == attempts:
-                            self.clientSocket.send("LINE~Invalid Password. Your account has been blocked. Please try again later".encode())
-                            blockLogin = BlockLoginThread(username)
+                            self.clientSocket.send("LINE~Invalid Password. Your account has been blocked. Please try again later|".encode())
+                            self.clientSocket.send("COMMAND~killClient".encode())
+                            print(f"User login blocked (10s): {self.clientAddr[0]}")
+                            blockLogin = BlockLoginThread(username, self.clientAddr[0])
                             blockLogin.start()
-                        break
+                            return False
+                        self.clientSocket.send("LINE~Invalid Password. Please try again".encode())
+                        return self.login()
+                        #break
+                        
         except IOError:
             print("Could not open credentials.txt")
             exit()
         except IndexError:
             print("Username has no associated password")
 
+    def log(self, message):
+        print(f" {message}: {self.clientAddr[0]} at {atetime.now().strftime("%H:%M:%S %d/%m/%Y")}")
+
+    def body(self):
+        while True:
+            self.clientSocket.send("INPUT~Enter one of the following commands (BCM, ATU, SRB, SRM, RDM, OUT): ".encode())
+            cmd = self.clientSocket.recv(1024).decode()
+            if len(cmd) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB","SRM","RDM","OUT"]:
+                self.clientSocket.send("LINE~Error. Invalid command!".encode())
+                continue
+            
 def fillInvalidLogins():
     global invalidLogins
     try:

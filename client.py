@@ -26,15 +26,19 @@ def main():
 
     while True:
         data = clientSocket.recv(1024).decode()
-        header, payload = splitMessage(data)
-        
-        if header == "INPUT":
-            clientSocket.send(input(payload).encode())
-        elif header == "COMMAND":
-            if payload == "sendUDPSocket":
-                clientSocket.send(str(clientPort).encode())
-        elif header == "LINE":
-            print(payload)
+        for d in data.split('|'):
+            header, payload = splitMessage(d)
+            
+            if header == "INPUT":
+                clientSocket.send(input(payload).encode())
+            elif header == "COMMAND":
+                if payload == "killClient":
+                    exit()
+                elif payload == "sendUDPSocket":
+                    clientSocket.send(str(clientPort).encode())
+            elif header == "LINE":
+                print(payload)
+
 
 if __name__ == "__main__":
     main()
