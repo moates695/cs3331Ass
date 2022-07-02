@@ -6,6 +6,7 @@ Author: Marcus Oates, z5257541
 # print(datetime.now().strftime("%-d %B %Y %H:%M:%S"))
 
 import sys
+import errno
 from socket import *
 from datetime import datetime
 from threading import Thread, Event
@@ -25,6 +26,7 @@ def send(clientSocket, clientHost, cmd, message):
         clientSocket.send(fullMessage.encode())
     except IOError:
         print(f"Broken pipe. User logged out: {clientHost}")
+        
 
 def write2UserLog(username, clientIP, clientPort):
     try:
@@ -87,7 +89,8 @@ class ClientThread(Thread):
                         #self.clientSocket.send("LINE~Username does not exist|".encode())
                         message = "Username does not exist"
                         send(self.clientSocket, self.clientAddr, "LINE", message)
-                        print(f"Invalid username provided: {self.clientAddr[0]}")
+                        #print(f"Invalid username provided: {self.clientAddr[0]}")
+                        self.log("Invalid username provided")
                         return self.login()
                     # read username does not match given username
                     if line.split()[0] != username:
@@ -131,7 +134,7 @@ class ClientThread(Thread):
             print("Username has no associated password")
 
     def log(self, message):
-        print(f" {message}: {self.clientAddr[0]} at {atetime.now().strftime("%H:%M:%S %d/%m/%Y")}")
+        print(f" {message}: {self.clientAddr[0]} at {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
 
     def body(self):
         while True:
@@ -190,7 +193,11 @@ def main():
         serverSocket.listen()
         clientSocket, clientAddr = serverSocket.accept()
         clientThread = ClientThread(clientSocket, clientAddr)
-        clientThread.start()
+        try:
+            clientThread.start()
+        except IOError as e: # structure taken from https://linuxpip.org/broken-pipe-python-error/
+            if e.errno == errno.EPIPE:
+                print(f"Broken ")
 
 if __name__ == "__main__":
     main()
