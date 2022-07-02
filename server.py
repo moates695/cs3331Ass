@@ -1,5 +1,5 @@
 """
-Version: Python3.9.2
+Version: Python 3.9.2
 Author: Marcus Oates, z5257541
 """
 
@@ -14,17 +14,24 @@ from helper import *
 def printBreak():
     print(f"{'='*40}")
 
-def login():
-    pass
-
 class ClientThread(Thread):
     def __init__(self, clientSocket, clientAddr):
         Thread.__init__(self)
         self.clientSocket = clientSocket
         self.clientAddr = clientAddr
-        self.clientAlive = True
-        print(f"Connection established with {self.clientAddr}")
-        
+        self.clientActive = True
+        print(f"Connection established with: {self.clientAddr}")
+
+    def run(self):
+        self.login()
+
+    def login(self):
+        self.clientSocket.send("Username: ".encode())
+        username = self.clientSocket.recv(1024).decode()
+        print(username)
+        self.clientSocket.send("Password: ".encode())
+        password = self.clientSocket.recv(1024).decode()
+        print(password)
 
 def main():
     if len(sys.argv) != 3:
@@ -33,6 +40,7 @@ def main():
     serverHost = gethostbyname(gethostname())
     serverPort = int(sys.argv[1])
     checkPortNumber(serverPort)
+    serverAddr = (serverHost, serverPort)
     try:
         attempts = int(sys.argv[2])
         if not 1 <= attempts <= 5:
@@ -40,10 +48,10 @@ def main():
             exit()
     except ValueError:
         print("Error: attempt limit must be integer value")
-    serverAddr = (serverHost, serverPort)
 
     serverSocket = socket(AF_INET, SOCK_STREAM)
-    serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    #serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    #serverSocket.setblocking(False)
     serverSocket.bind(serverAddr)
 
     printBreak()
@@ -58,6 +66,7 @@ def main():
         serverSocket.listen()
         clientSocket, clientAddr = serverSocket.accept()
         clientThread = ClientThread(clientSocket, clientAddr)
+        clientThread.run()
 
 if __name__ == "__main__":
     main()
