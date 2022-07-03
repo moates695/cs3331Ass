@@ -16,6 +16,8 @@ from os import chmod
 
 invalidLogins = {}
 attempts = None
+usernames = []
+srs = {}
 
 def printBreak():
     print(f"{'='*40}")
@@ -47,9 +49,12 @@ class ClientThread(Thread):
         
     def login(self):
         global invalidLogins
-        
+        global usernames
+
         self.clientSocket.send("INPUT~Username: ".encode())
         self.username = self.clientSocket.recv(1024).decode()
+        if self.username not in usernames:
+            usernames.append(self.username)
 
         self.clientSocket.send("INPUT~Password: ".encode())
         password = self.clientSocket.recv(1024).decode()
@@ -150,7 +155,7 @@ class ClientThread(Thread):
                 self.doATU(cmd)
             elif cmd.split()[0] == "SRB":
                 self.log("Command selected 'SRB'")
-                self.doSRB()
+                self.doSRB(cmd)
             elif cmd.split()[0] == "SRM":
                 self.log("Command selected 'SRM'")
                 self.doSRM()
@@ -251,7 +256,7 @@ class ClientThread(Thread):
             self.log("ATU fail, arguments provided")
             return
         users = []
-        with open("userlog.txt") as file:
+        with open("userlog.txt", "r") as file:
             while True:
                 line = file.readline()
                 if not line:
@@ -267,8 +272,40 @@ class ClientThread(Thread):
                 self.send("LINE", f"{split[2]} active since {split[1]} at {split[3]} with UDP port {split[4]}")
             self.log("ATU successful")
 
-    def doSRB(self):
-        pass
+    def doSRB(self, command):
+        if len(command.split()) == 1:
+            self.send("LINE", "SRB requires usernames")
+            self.log("SRB fail, no usernames")
+            return
+        # check room hasn't been created
+        invalid = []
+        offline = []
+        for username in command.split()[1:]:
+            if self.username == username:
+                self.send("LINE", "SRB cannot contain your username")
+                self.log("SRB fail, provided own username")
+                return
+            if username not in usernames:
+                invalid.append(username)
+                continue
+            with open("userlog.txt", "r") as file:
+                while True:
+                    line = file.readline()
+                    if not line:
+                        offline.append(username)
+                        break
+                    if line.split("; ")[2] == username:
+                        break
+        if len(invalid) != 0 or len(offline) != 0:
+            message = "The following errors occurred:\n"
+            for user in invalid:
+                message += f"   {user} does not exist\n"
+            for user in offline:
+                message += f"   {user} is offline\n"
+            self.send("LINE", message[:-1])
+            self.log("SRB fail, invalid usernames provided")
+            return
+        
 
     def doSRM(self):
         pass

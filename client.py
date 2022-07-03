@@ -30,15 +30,14 @@ def main():
             header, payload = splitMessage(d)
             
             if header == "INPUT":
-                clientSocket.send(input(payload).encode())
+                clientSocket.send(input("> " + payload).encode())
             elif header == "COMMAND":
                 if payload == "killClient":
                     exit()
                 elif payload == "sendUDPSocket":
                     clientSocket.send(str(clientPort).encode())
             elif header == "LINE":
-                print(payload)
-
+                print("  " + payload)
 
 if __name__ == "__main__":
     main()
