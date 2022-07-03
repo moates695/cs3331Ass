@@ -37,6 +37,7 @@ class ClientThread(Thread):
         self.clientSocket = clientSocket
         self.clientAddr = clientAddr
         self.clientActive = True
+        self.username = None
         print(f"+ Connection established with: {self.clientAddr[0]}")
 
     def run(self):
@@ -47,22 +48,24 @@ class ClientThread(Thread):
         global invalidLogins
         
         self.clientSocket.send("INPUT~Username: ".encode())
-        username = self.clientSocket.recv(1024).decode()
+        self.username = self.clientSocket.recv(1024).decode()
 
         self.clientSocket.send("INPUT~Password: ".encode())
         password = self.clientSocket.recv(1024).decode()
         
         try:
             with open("credentials.txt", "r") as file:
-                    return self.readFile(file, username, password)       
+                    return self.readFile(file, password)       
         except IOError as e:
             if e.errno != errno.EPIPE:
-                self.log("Could not open credentials.txt")
+                print("Could not open credentials.txt")
                 exit()
         except IndexError:
+            self.send("LINE", "Database error: password for user has been lost!")
             self.log("Username has no associated password")
+            return self.login()
 
-    def readFile(self, file, username, password):
+    def readFile(self, file, password):
         while True:
             line = file.readline()
 
@@ -73,11 +76,11 @@ class ClientThread(Thread):
                 return self.login()
             
             # read username does not match given username
-            if line.split()[0] != username:
+            if line.split()[0] != self.username:
                 continue
             
             # user is currently locked out
-            if invalidLogins[username] == attempts:
+            if invalidLogins[self.username] == attempts:
                 message = "Your account is blocked due to multiple login failures. Please try again later"
                 self.send("LINE", message)
                 self.log("Login attempt while blocked")
@@ -86,26 +89,26 @@ class ClientThread(Thread):
             
             # password is valid
             if line.split()[1] == password:
-                invalidLogins[username] = 0
+                invalidLogins[self.username] = 0
                 self.send("COMMAND", "sendUDPSocket")
                 clientPort = int(self.clientSocket.recv(1024).decode())
-                self.write2UserLog(username, clientPort)
+                self.append2UserLog(self.username, clientPort)
                 self.log("User login processed")
                 self.send("LINE", "Welcome to Toom!")
                 return True
             
             # password is invalid
             else:
-                invalidLogins[username] += 1
-                print(f"Invalid password entered: {self.clientAddr[0]}")
+                invalidLogins[self.username] += 1
+                self.log("Invalid password entered")
                 
-                if invalidLogins[username] == attempts:
+                if invalidLogins[self.username] == attempts:
                     message = "Invalid Password. Your account has been blocked. Please try again later"
                     self.send("LINE", message)
                     self.send("COMMAND", "killClient")
                     self.log("User login blocked (10s)")
                     
-                    blockLogin = BlockLoginThread(username, self.clientAddr[0])
+                    blockLogin = BlockLoginThread(self.username, self.clientAddr[0])
                     blockLogin.start()
                     return False
                 
@@ -127,26 +130,49 @@ class ClientThread(Thread):
             if not self.send("INPUT", message):
                 break
             cmd = self.clientSocket.recv(1024).decode()
-            if len(cmd) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB","SRM","RDM","OUT"]:
-                if not self.send("LINE", "Error. Invalid command!"):
-                    break
-                self.log("Invalid command selected")
+            if len(cmd.split()) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB", "SRM","RDM","OUT","UDP"]:
+                self.send("LINE", "Error. Invalid command!")
+                if len(cmd.split()) == 0:
+                    self.log(f"No command selected")
+                else:
+                    self.log(f"Invalid command selected '{cmd}'")
                 continue
+            elif cmd.split()[0] == "BCM":
+                self.log("BCM command selected")
+                self.doBCM()
+            elif cmd.split()[0] == "ATU":
+                self.log("ATU command selected")
+                self.doATU()
+            elif cmd.split()[0] == "SRB":
+                self.log("SRB command selected")
+                self.doSRB()
+            elif cmd.split()[0] == "SRM":
+                self.log("SRM command selected")
+                self.doSRM()
+            elif cmd.split()[0] == "RDM":
+                self.log("RDM command selected")
+                self.doRDM()
+            elif cmd.split()[0] == "OUT":
+                self.log("OUT command selected")
+                self.doOUT()
+            else:
+                self.doUDP()
 
-    # send message and catch broken pipe + logout user
+    # send message and catch broken pipe
     def send(self, cmd, message):
         fullMessage = cmd + "~" + message + "|"
         try:
             self.clientSocket.send(fullMessage.encode())
         except IOError as e: # structure taken from https://linuxpip.org/broken-pipe-python-error/
             if e.errno == errno.EPIPE:
-                self.log("Broken pipe. User logged out")
+                self.log("Broken pipe")
+                self.doOUT(False)
+                exit()
                 return False    
-        else:
-            return True      
+        return True      
 
     # append message to userlog.txt
-    def write2UserLog(self, username, clientPort):
+    def append2UserLog(self, username, clientPort):
         try:
             seqNum = 1
             with open("userlog.txt", "r") as file:
@@ -165,7 +191,56 @@ class ClientThread(Thread):
         except IOError:
             print("Could not open userlog.txt")
             exit()
-            
+    
+    def doBCM(self):
+        pass
+
+    def doATU(self):
+        pass
+
+    def doSRB(self):
+        pass
+
+    def doSRM(self):
+        pass
+
+    def doRDM(self):
+        pass
+
+    def doOUT(self, sendMessage=True):
+        entrys = []
+        shift = False
+        try:
+            with open("userlog.txt", "r") as file:
+                while True:
+                    line = file.readline()
+                    if not line:
+                        break
+                    if line.split("; ")[2] == self.username:
+                        shift = True
+                        continue
+                    if not shift:
+                        entrys.append(line)
+                    else:   
+                        entrys.append(str(int(line[0])-1)+line[1:])            
+            with open("userlog.txt", "w") as file:
+                for entry in entrys:
+                    file.write(entry)
+        except IOError as e:
+            if e.errno != errno.EPIPE:
+                print("Could not open userlog.txt")
+                exit()
+        except IndexError:
+            print("Details stored incorrectly in userlog.txt")
+            exit()
+        if sendMessage:
+            self.send("LINE", f"Bye {self.username}!")
+            self.send("COMMAND", "killClient")
+        self.log("User logged out", logout=True)
+
+    def doUDP(self):
+        pass
+
 def fillInvalidLogins():
     global invalidLogins
     try:
