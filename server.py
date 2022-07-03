@@ -12,6 +12,7 @@ from datetime import datetime
 from threading import Thread, Event
 from helper import *
 from time import sleep
+from os import chmod
 
 invalidLogins = {}
 attempts = None
@@ -92,7 +93,8 @@ class ClientThread(Thread):
                 invalidLogins[self.username] = 0
                 self.send("COMMAND", "sendUDPSocket")
                 clientPort = int(self.clientSocket.recv(1024).decode())
-                self.append2UserLog(self.username, clientPort)
+                #self.append2UserLog(self.username, clientPort)
+                self.append2Log("userlog.txt", clientPort)
                 self.log("User login processed")
                 self.send("LINE", "Welcome to Toom!")
                 return True
@@ -115,14 +117,17 @@ class ClientThread(Thread):
                 self.send("LINE", "Invalid Password. Please try again")
                 return self.login()
 
-    def log(self, message, login=False, logout=False):
+    def log(self, message, login=False, logout=False, plain=False):
         if login:
             message = "+ " + message
         elif logout:
             message = "- " + message
         else:
             message = "  " + message
-        print(f"{message}: {self.clientAddr[0]} at {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
+        if plain:
+            print(message)
+        else:
+            print(f"{message}: {self.clientAddr[0]} at {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
 
     def body(self):
         while True:
@@ -138,23 +143,24 @@ class ClientThread(Thread):
                     self.log(f"Invalid command selected '{cmd}'")
                 continue
             elif cmd.split()[0] == "BCM":
-                self.log("BCM command selected")
-                self.doBCM()
+                self.log("Command selected 'BCM'")
+                self.doBCM(cmd)
             elif cmd.split()[0] == "ATU":
-                self.log("ATU command selected")
-                self.doATU()
+                self.log("Command selected 'ATU'")
+                self.doATU(cmd)
             elif cmd.split()[0] == "SRB":
-                self.log("SRB command selected")
+                self.log("Command selected 'SRB'")
                 self.doSRB()
             elif cmd.split()[0] == "SRM":
-                self.log("SRM command selected")
+                self.log("Command selected 'SRM'")
                 self.doSRM()
             elif cmd.split()[0] == "RDM":
-                self.log("RDM command selected")
+                self.log("Command selected 'RDM'")
                 self.doRDM()
             elif cmd.split()[0] == "OUT":
-                self.log("OUT command selected")
+                self.log("Command selected 'OUT'")
                 self.doOUT()
+                return
             else:
                 self.doUDP()
 
@@ -171,9 +177,25 @@ class ClientThread(Thread):
                 return False    
         return True      
 
+    def getSeqNum(self, filename):
+        try:
+            seqNum = 1
+            with open(filename, "r") as file:
+                while True:
+                    line = file.readline()
+                    if not line:
+                        break
+                    seqNum += 1  
+        except IOError:
+            open(filename, "w").close()
+            #print(f"Could not open {filename}")
+            chmod(filename, 0o777)
+            return self.getSeqNum(filename)
+        return seqNum
+
     # append message to userlog.txt
     def append2UserLog(self, username, clientPort):
-        try:
+        """ try:
             seqNum = 1
             with open("userlog.txt", "r") as file:
                 while True:
@@ -182,21 +204,68 @@ class ClientThread(Thread):
                         break
                     seqNum += 1  
         except IOError:
-            pass
+            pass """
+        seqNum = self.getSeqNum("userlog.txt")
         
         try:
             with open("userlog.txt", "a") as file:
                 string = datetime.now().strftime("%-d %B %Y %H:%M:%S")
                 file.write(f"{seqNum}; {string}; {username}; {self.clientAddr[0]}; {clientPort}\n")  
         except IOError:
-            print("Could not open userlog.txt")
-            exit()
+            open("userlog.txt", "w").close()
+            chmod("userlog.txt", 0o777)
+            self.append2UserLog(username, clientPort)
+            """ print("Could not open userlog.txt")
+            exit() """
     
-    def doBCM(self):
-        pass
+    def append2Log(self, filename, *argv):
+        seqNum = self.getSeqNum(filename)
+        string = datetime.now().strftime("%-d %B %Y %H:%M:%S")
+        try:
+            if filename == "userlog.txt":
+                with open("userlog.txt", "a") as file:
+                    file.write(f"{seqNum}; {string}; {self.username}; {self.clientAddr[0]}; {argv[0]}\n")  
+            elif filename == "messagelog.txt":
+                with open("messagelog.txt", "a") as file:
+                    file.write(f"{seqNum}; {string}; {self.username}; {argv[0]}\n")
+        except IOError:
+            open(filename, "w").close()
+            chmod(filename, 0o777)
+            self.append2Log(filename, *argv)
+            """ print(f"Could not open userlog.txt")
+            exit() """
+        return seqNum, string
 
-    def doATU(self):
-        pass
+    def doBCM(self, command):
+        if len(command.split()) <= 1:
+            self.send("LINE", "BCM requires a message body")
+            self.log("BCM fail, no message body")
+            return      
+        seqNum, string = self.append2Log("messagelog.txt", command[4:])
+        self.send("LINE", f"Broadcast message #{seqNum} at {string}")
+        self.log(f"BCM successful, #{seqNum}")
+
+    def doATU(self, command):
+        if len(command.split()) != 1:
+            self.send("LINE", "ATU has no arguments")
+            self.log("ATU fail, arguments provided")
+            return
+        users = []
+        with open("userlog.txt") as file:
+            while True:
+                line = file.readline()
+                if not line:
+                    break
+                if line.split("; ")[2] == self.username:
+                    continue
+                users.append(line)
+        if len(users) == 0:
+            self.send("LINE", "No other active users")
+        else:
+            for user in users:
+                split = user[:-1].split("; ")
+                self.send("LINE", f"{split[2]} active since {split[1]} at {split[3]} with UDP port {split[4]}")
+            self.log("ATU successful")
 
     def doSRB(self):
         pass
