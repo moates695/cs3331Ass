@@ -11,6 +11,7 @@ from threading import Thread
 def main():
     if len(sys.argv) != 4:
         print("Usage: server.py [serverHost] [serverPort] [clientPort]")
+        return
 
     serverHost = sys.argv[1]
     serverPort = int(sys.argv[2])

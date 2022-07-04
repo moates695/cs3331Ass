@@ -13,6 +13,7 @@ from threading import Thread, Event
 from helper import *
 from time import sleep
 from os import chmod
+import re
 
 invalidLogins = {}
 attempts = None
@@ -132,7 +133,10 @@ class ClientThread(Thread):
         if plain:
             print(message)
         else:
-            print(f"{message}: {self.clientAddr[0]} at {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
+            if self.username == None:
+                print(f"{message}: {self.clientAddr[0]} at {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
+            else:
+                print(f"{message}: {self.username} at {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
 
     def body(self):
         while True:
@@ -158,10 +162,10 @@ class ClientThread(Thread):
                 self.doSRB(cmd)
             elif cmd.split()[0] == "SRM":
                 self.log("Command selected 'SRM'")
-                self.doSRM()
+                self.doSRM(cmd)
             elif cmd.split()[0] == "RDM":
                 self.log("Command selected 'RDM'")
-                self.doRDM()
+                self.doRDM(cmd)
             elif cmd.split()[0] == "OUT":
                 self.log("Command selected 'OUT'")
                 self.doOUT()
@@ -228,11 +232,14 @@ class ClientThread(Thread):
         string = datetime.now().strftime("%-d %B %Y %H:%M:%S")
         try:
             if filename == "userlog.txt":
-                with open("userlog.txt", "a") as file:
+                with open(filename, "a") as file:
                     file.write(f"{seqNum}; {string}; {self.username}; {self.clientAddr[0]}; {argv[0]}\n")  
             elif filename == "messagelog.txt":
-                with open("messagelog.txt", "a") as file:
+                with open(filename, "a") as file:
                     file.write(f"{seqNum}; {string}; {self.username}; {argv[0]}\n")
+            elif re.match("SR_[0-9]+_mess", filename):
+                with open(filename, "a") as file:
+                    file.write(f"")
         except IOError:
             open(filename, "w").close()
             chmod(filename, 0o777)
@@ -273,18 +280,36 @@ class ClientThread(Thread):
             self.log("ATU successful")
 
     def doSRB(self, command):
+        global srs
+        #print(srs)
         if len(command.split()) == 1:
             self.send("LINE", "SRB requires usernames")
             self.log("SRB fail, no usernames")
+            return 
+        givenUsernames = command.split()[1:]
+        if self.username in givenUsernames:
+            self.send("LINE", "SRB cannot contain your username")
+            self.log("SRB fail, provided own username")
             return
-        # check room hasn't been created
+        givenUsernames.append(self.username)
+        if len(set(givenUsernames)) != len(givenUsernames):
+            self.send("LINE", "SRB cannot have duplicate usernames")
+            self.log("SRB fail, duplicate usernames")
+            return
+        for idr, room in srs.items():
+            if len(room) != len(givenUsernames):
+                continue
+            for user in  givenUsernames:
+                if user not in room:
+                    break
+            else:
+                self.send("LINE", f"SRB room already exists ID: {idr}")
+                self.log(f"SRB fail, room already exists ID: {idr}")
+                return
+
         invalid = []
         offline = []
-        for username in command.split()[1:]:
-            if self.username == username:
-                self.send("LINE", "SRB cannot contain your username")
-                self.log("SRB fail, provided own username")
-                return
+        for username in givenUsernames:
             if username not in usernames:
                 invalid.append(username)
                 continue
@@ -305,10 +330,38 @@ class ClientThread(Thread):
             self.send("LINE", message[:-1])
             self.log("SRB fail, invalid usernames provided")
             return
-        
 
-    def doSRM(self):
-        pass
+        idrMax = 0
+        for idr in srs.keys():
+            if idrMax < idr:
+                idrMax = idr
+        idrMax += 1
+        srs[idrMax] = givenUsernames
+        open(f"SR_{idrMax}_messagelog.txt", "w").close()
+        message = f"Room ID: {idrMax} created with users: " + " ".join(givenUsernames)
+        self.send("LINE", message)
+        self.log(f"SRB success, room ID {idrMax} created")
+
+    def doSRM(self, command):
+        if len(command.split()) < 3:
+            self.send("LINE", "SRM requires roomID and message")
+            self.log("SRM fail, incorrect usage")
+            return
+
+        roomId = command.split()[1]
+        message = " ".join(command.split()[2:])
+
+        if roomId not in srs.keys():
+            self.send("LINE", f"Room ID {roomId} does not exist")
+            self.log(f"SRM fail, invalid room ID {roomId}")
+            return
+
+        if self.username not in srs[roomId]:
+            self.send("LINE", f"You are not a member of room ID {roomId}")
+            self.log(f"SRM fail, not member of room ID {roomId}")
+            return
+        
+        append2Log()
 
     def doRDM(self):
         pass
@@ -364,8 +417,11 @@ def main():
     global attempts
     if len(sys.argv) != 3:
         print("Usage: server.py [serverPort] [attempts]")
+        return
     
     fillInvalidLogins()
+
+    open("userlog.txt", "w").close()
 
     serverHost = gethostbyname(gethostname())
     serverPort = int(sys.argv[1])
