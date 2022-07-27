@@ -39,6 +39,8 @@ def main():
                     clientSocket.send(str(clientPort).encode())
             elif header == "LINE":
                 print("  " + payload)
+            elif header == "ERROR":
+                print("  ERROR: " + payload)
 
 if __name__ == "__main__":
     main()

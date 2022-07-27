@@ -62,13 +62,13 @@ class ClientThread(Thread):
         
         try:
             with open("credentials.txt", "r") as file:
-                    return self.readFile(file, password)       
+                return self.readFile(file, password)       
         except IOError as e:
             if e.errno != errno.EPIPE:
                 print("Could not open credentials.txt")
                 exit()
         except IndexError:
-            self.send("LINE", "Database error: password for user has been lost!")
+            self.send("ERROR", "Database error: password for user has been lost!")
             self.log("Username has no associated password")
             return self.login()
 
@@ -100,7 +100,7 @@ class ClientThread(Thread):
                 self.send("COMMAND", "sendUDPSocket")
                 clientPort = int(self.clientSocket.recv(1024).decode())
                 #self.append2UserLog(self.username, clientPort)
-                self.append2Log("userlog.txt", clientPort)
+                self.append2Log("userlog.txt", False, clientPort)
                 self.log("User login processed")
                 self.send("LINE", "Welcome to Toom!")
                 return True
@@ -186,7 +186,7 @@ class ClientThread(Thread):
                 return False    
         return True      
 
-    def getSeqNum(self, filename):
+    def getSeqNum(self, filename, tried=False):
         try:
             seqNum = 1
             with open(filename, "r") as file:
@@ -199,35 +199,13 @@ class ClientThread(Thread):
             open(filename, "w").close()
             #print(f"Could not open {filename}")
             chmod(filename, 0o777)
-            return self.getSeqNum(filename)
+            if not tried:
+                return self.getSeqNum(filename, true)
+            else:
+                return -1
         return seqNum
-
-    # append message to userlog.txt
-    def append2UserLog(self, username, clientPort):
-        """ try:
-            seqNum = 1
-            with open("userlog.txt", "r") as file:
-                while True:
-                    line = file.readline()
-                    if not line:
-                        break
-                    seqNum += 1  
-        except IOError:
-            pass """
-        seqNum = self.getSeqNum("userlog.txt")
-        
-        try:
-            with open("userlog.txt", "a") as file:
-                string = datetime.now().strftime("%-d %B %Y %H:%M:%S")
-                file.write(f"{seqNum}; {string}; {username}; {self.clientAddr[0]}; {clientPort}\n")  
-        except IOError:
-            open("userlog.txt", "w").close()
-            chmod("userlog.txt", 0o777)
-            self.append2UserLog(username, clientPort)
-            """ print("Could not open userlog.txt")
-            exit() """
     
-    def append2Log(self, filename, *argv):
+    def append2Log(self, filename, tried, *argv):
         seqNum = self.getSeqNum(filename)
         string = datetime.now().strftime("%-d %B %Y %H:%M:%S")
         try:
@@ -237,13 +215,15 @@ class ClientThread(Thread):
             elif filename == "messagelog.txt":
                 with open(filename, "a") as file:
                     file.write(f"{seqNum}; {string}; {self.username}; {argv[0]}\n")
-            elif re.match("SR_[0-9]+_mess", filename):
+            elif re.match("SR_[0-9]+_messagelog.txt", filename):
                 with open(filename, "a") as file:
-                    file.write(f"")
+                    file.write(f"{seqNum}; {string}; {self.username}; {argv[0]}")
         except IOError:
             open(filename, "w").close()
             chmod(filename, 0o777)
-            self.append2Log(filename, *argv)
+            if tried:
+                exit()
+            self.append2Log(filename, True, *argv)
             """ print(f"Could not open userlog.txt")
             exit() """
         return seqNum, string
@@ -253,9 +233,9 @@ class ClientThread(Thread):
             self.send("LINE", "BCM requires a message body")
             self.log("BCM fail, no message body")
             return      
-        seqNum, string = self.append2Log("messagelog.txt", command[4:])
+        seqNum, string = self.append2Log("messagelog.txt", False, command[4:])
         self.send("LINE", f"Broadcast message #{seqNum} at {string}")
-        self.log(f"BCM successful, #{seqNum}")
+        self.log(f"BCM success, #{seqNum}")
 
     def doATU(self, command):
         if len(command.split()) != 1:
@@ -277,7 +257,7 @@ class ClientThread(Thread):
             for user in users:
                 split = user[:-1].split("; ")
                 self.send("LINE", f"{split[2]} active since {split[1]} at {split[3]} with UDP port {split[4]}")
-            self.log("ATU successful")
+            self.log("ATU success")
 
     def doSRB(self, command):
         global srs
@@ -321,6 +301,7 @@ class ClientThread(Thread):
                         break
                     if line.split("; ")[2] == username:
                         break
+
         if len(invalid) != 0 or len(offline) != 0:
             message = "The following errors occurred:\n"
             for user in invalid:
@@ -343,12 +324,13 @@ class ClientThread(Thread):
         self.log(f"SRB success, room ID {idrMax} created")
 
     def doSRM(self, command):
+        print(srs)
         if len(command.split()) < 3:
             self.send("LINE", "SRM requires roomID and message")
             self.log("SRM fail, incorrect usage")
             return
 
-        roomId = command.split()[1]
+        roomId = int(command.split()[1])
         message = " ".join(command.split()[2:])
 
         if roomId not in srs.keys():
@@ -361,7 +343,9 @@ class ClientThread(Thread):
             self.log(f"SRM fail, not member of room ID {roomId}")
             return
         
-        append2Log()
+        seqNum, string = self.append2Log(f"SR_{roomId}_messagelog.txt", False, command[4:])
+        self.send("LINE", f"SRS message #{seqNum} in room {roomId} at {string}")
+        self.log(f"SRM success, message #{seqNum} in room {roomId}")
 
     def doRDM(self):
         pass
@@ -422,6 +406,7 @@ def main():
     fillInvalidLogins()
 
     open("userlog.txt", "w").close()
+    open("messagelog.txt", "w").close()
 
     serverHost = gethostbyname(gethostname())
     serverPort = int(sys.argv[1])
@@ -442,8 +427,8 @@ def main():
 
     printBreak()
     print("SERVER RUNNING")
-    print(f"port: {serverPort}")
     print(f"host: {serverHost}")
+    print(f"port: {serverPort}")
     printBreak()
     print("Waiting for connection requests...")
     printBreak()
