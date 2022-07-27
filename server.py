@@ -207,7 +207,7 @@ class ClientThread(Thread):
     
     def append2Log(self, filename, tried, *argv):
         seqNum = self.getSeqNum(filename)
-        string = datetime.now().strftime("%-d %B %Y %H:%M:%S")
+        string = datetime.now().strftime("%d %b %Y %H:%M:%S")
         try:
             if filename == "userlog.txt":
                 with open(filename, "a") as file:
@@ -324,9 +324,8 @@ class ClientThread(Thread):
         self.log(f"SRB success, room ID {idrMax} created")
 
     def doSRM(self, command):
-        print(srs)
         if len(command.split()) < 3:
-            self.send("LINE", "SRM requires roomID and message")
+            self.send("ERROR", "SRM requires roomID and message")
             self.log("SRM fail, incorrect usage")
             return
 
@@ -347,8 +346,14 @@ class ClientThread(Thread):
         self.send("LINE", f"SRS message #{seqNum} in room {roomId} at {string}")
         self.log(f"SRM success, message #{seqNum} in room {roomId}")
 
-    def doRDM(self):
-        pass
+    def doRDM(self, command):
+        if len(command.split()) < 3:
+            self.send("ERROR", "RDM requires messageType and timestamp")
+            self.log("SRM fail, incorrect usage")
+            return
+
+        messageType = command.split()[1]
+        timestamp = command.split()[2]
 
     def doOUT(self, sendMessage=True):
         entrys = []
