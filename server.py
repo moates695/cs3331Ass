@@ -12,12 +12,13 @@ from datetime import datetime
 from threading import Thread, Event
 from helper import *
 from time import sleep
-from os import chmod
+from os import chmod, listdir, remove
 import re
 
 invalidLogins = {}
 attempts = None
-usernames = []
+allUsernames = []
+activeUsernames = []
 srs = {}
 
 def printBreak():
@@ -50,19 +51,22 @@ class ClientThread(Thread):
         
     def login(self):
         global invalidLogins
-        global usernames
+        global allUsernames
 
         self.clientSocket.send("INPUT~Username: ".encode())
         self.username = self.clientSocket.recv(1024).decode()
-        if self.username not in usernames:
-            usernames.append(self.username)
 
         self.clientSocket.send("INPUT~Password: ".encode())
         password = self.clientSocket.recv(1024).decode()
         
         try:
             with open("credentials.txt", "r") as file:
-                return self.readFile(file, password)       
+                if self.readFile(file, password):
+                    if self.username not in activeUsernames:
+                        activeUsernames.append(self.username)
+                    return True
+                else:
+                    return False       
         except IOError as e:
             if e.errno != errno.EPIPE:
                 print("Could not open credentials.txt")
@@ -99,7 +103,6 @@ class ClientThread(Thread):
                 invalidLogins[self.username] = 0
                 self.send("COMMAND", "sendUDPSocket")
                 clientPort = int(self.clientSocket.recv(1024).decode())
-                #self.append2UserLog(self.username, clientPort)
                 self.append2Log("userlog.txt", False, clientPort)
                 self.log("User login processed")
                 self.send("LINE", "Welcome to Toom!")
@@ -145,7 +148,7 @@ class ClientThread(Thread):
                 break
             cmd = self.clientSocket.recv(1024).decode()
             if len(cmd.split()) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB", "SRM","RDM","OUT","UDP"]:
-                self.send("LINE", "Error. Invalid command!")
+                self.send("ERROR", "Invalid command!")
                 if len(cmd.split()) == 0:
                     self.log(f"No command selected")
                 else:
@@ -217,15 +220,13 @@ class ClientThread(Thread):
                     file.write(f"{seqNum}; {string}; {self.username}; {argv[0]}\n")
             elif re.match("SR_[0-9]+_messagelog.txt", filename):
                 with open(filename, "a") as file:
-                    file.write(f"{seqNum}; {string}; {self.username}; {argv[0]}")
+                    file.write(f"{seqNum}; {string}; {self.username}; {argv[0]}\n")
         except IOError:
             open(filename, "w").close()
             chmod(filename, 0o777)
             if tried:
                 exit()
             self.append2Log(filename, True, *argv)
-            """ print(f"Could not open userlog.txt")
-            exit() """
         return seqNum, string
 
     def doBCM(self, command):
@@ -261,7 +262,6 @@ class ClientThread(Thread):
 
     def doSRB(self, command):
         global srs
-        #print(srs)
         if len(command.split()) == 1:
             self.send("LINE", "SRB requires usernames")
             self.log("SRB fail, no usernames")
@@ -276,6 +276,7 @@ class ClientThread(Thread):
             self.send("LINE", "SRB cannot have duplicate usernames")
             self.log("SRB fail, duplicate usernames")
             return
+
         for idr, room in srs.items():
             if len(room) != len(givenUsernames):
                 continue
@@ -290,17 +291,12 @@ class ClientThread(Thread):
         invalid = []
         offline = []
         for username in givenUsernames:
-            if username not in usernames:
+            if username not in allUsernames:
                 invalid.append(username)
                 continue
-            with open("userlog.txt", "r") as file:
-                while True:
-                    line = file.readline()
-                    if not line:
-                        offline.append(username)
-                        break
-                    if line.split("; ")[2] == username:
-                        break
+            if username not in activeUsernames:
+                offline.append(username)
+                continue
 
         if len(invalid) != 0 or len(offline) != 0:
             message = "The following errors occurred:\n"
@@ -356,6 +352,11 @@ class ClientThread(Thread):
         timestamp = command.split()[2]
 
     def doOUT(self, sendMessage=True):
+        global invalidLogins
+        invalidLogins[self.username] = 0
+        global activeUsernames
+        activeUsernames.remove(self.username)
+
         entrys = []
         shift = False
         try:
@@ -384,6 +385,7 @@ class ClientThread(Thread):
         if sendMessage:
             self.send("LINE", f"Bye {self.username}!")
             self.send("COMMAND", "killClient")
+        
         self.log("User logged out", logout=True)
 
     def doUDP(self):
@@ -402,16 +404,36 @@ def fillInvalidLogins():
         print("Could not open credentials.txt")
         exit()
 
+def findUsernames():
+    global allUsernames
+    try:
+        with open("credentials.txt", "r") as file:
+            while True:
+                line = file.readline()
+                if not line:
+                    break
+                allUsernames.append(line.split()[0])
+    except IOError:
+        return
+
+def flush():
+    open("userlog.txt", "w").close()
+    open("messagelog.txt", "w").close()
+    filenames = [filename for filename in listdir()]
+    for filename in filenames:
+        if re.match("SR_[0-9]+_messagelog.txt", filename):
+            remove(filename)
+
 def main():
     global attempts
+
     if len(sys.argv) != 3:
         print("Usage: server.py [serverPort] [attempts]")
         return
     
     fillInvalidLogins()
-
-    open("userlog.txt", "w").close()
-    open("messagelog.txt", "w").close()
+    findUsernames()
+    flush()
 
     serverHost = gethostbyname(gethostname())
     serverPort = int(sys.argv[1])
