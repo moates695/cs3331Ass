@@ -244,14 +244,19 @@ class ClientThread(Thread):
             self.log("ATU fail, arguments provided")
             return
         users = []
-        with open("userlog.txt", "r") as file:
-            while True:
-                line = file.readline()
-                if not line:
-                    break
-                if line.split("; ")[2] == self.username:
-                    continue
-                users.append(line)
+        try:
+            with open("userlog.txt", "r") as file:
+                while True:
+                    line = file.readline()
+                    if not line:
+                        break
+                    if line.split("; ")[2] == self.username:
+                        continue
+                    users.append(line)
+        except IOError:
+            self.log("Cannot open userlog.txt")
+            return
+
         if len(users) == 0:
             self.send("LINE", "No other active users")
         else:
@@ -350,6 +355,11 @@ class ClientThread(Thread):
 
         messageType = command.split()[1]
         timestamp = command.split()[2]
+
+        if messageType not in ["b", "s"]:
+            self.send("LINE", "RDM requires messageType 'b' or 's'")
+            self.log("SRM fail, incorrect messageType")
+            return
 
     def doOUT(self, sendMessage=True):
         global invalidLogins

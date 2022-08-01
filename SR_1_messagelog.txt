@@ -1,2 +1,0 @@
-1; 01 Aug 2022 18:30:24; user2; 1 hello there
-2; 01 Aug 2022 18:30:42; user1; 1 message number 2
