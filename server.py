@@ -1,9 +1,7 @@
 """
 Version: Python 3.9.2
-Author: Marcus Oates, z5257541
+Author: Marcus Oates z5257541
 """
-
-# print(datetime.now().strftime("%-d %B %Y %H:%M:%S"))
 
 import sys
 import errno
@@ -137,9 +135,9 @@ class ClientThread(Thread):
             print(message)
         else:
             if self.username == None:
-                print(f"{message}: {self.clientAddr[0]} at {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
+                print(f"{message}: {self.clientAddr[0]} at {datetime.now().strftime('%H:%M:%S %-d/%m/%Y')}")
             else:
-                print(f"{message}: {self.username} at {datetime.now().strftime('%H:%M:%S %d/%m/%Y')}")
+                print(f"{message}: {self.username} at {datetime.now().strftime('%H:%M:%S %-d/%m/%Y')}")
 
     def body(self):
         while True:
@@ -171,7 +169,7 @@ class ClientThread(Thread):
                 self.doRDM(cmd)
             elif cmd.split()[0] == "OUT":
                 self.log("Command selected 'OUT'")
-                self.doOUT()
+                self.doOUT(command=cmd)
                 return
             else:
                 self.doUDP()
@@ -184,7 +182,7 @@ class ClientThread(Thread):
         except IOError as e: # structure taken from https://linuxpip.org/broken-pipe-python-error/
             if e.errno == errno.EPIPE:
                 self.log("Broken pipe")
-                self.doOUT(False)
+                self.doOUT(sendMessage=False)
                 exit()
                 return False    
         return True      
@@ -210,7 +208,7 @@ class ClientThread(Thread):
     
     def append2Log(self, filename, tried, *argv):
         seqNum = self.getSeqNum(filename)
-        string = datetime.now().strftime("%d %b %Y %H:%M:%S")
+        string = datetime.now().strftime("%-d %b %Y %H:%M:%S")
         try:
             if filename == "userlog.txt":
                 with open(filename, "a") as file:
@@ -347,21 +345,95 @@ class ClientThread(Thread):
         self.send("LINE", f"SRS message #{seqNum} in room {roomId} at {string}")
         self.log(f"SRM success, message #{seqNum} in room {roomId}")
 
+    def returnFormat(line):
+        split = line.split("; ")
+        num = split[0]
+        time = split[1]
+        user = split[2]
+        message = split[3]
+        return f"#{num}; {user}: {message} at {time}"
+
     def doRDM(self, command):
         if len(command.split()) < 3:
             self.send("ERROR", "RDM requires messageType and timestamp")
-            self.log("SRM fail, incorrect usage")
+            self.log("RDM fail, incorrect usage")
             return
 
         messageType = command.split()[1]
-        timestamp = command.split()[2]
+        timestampText = command.split()[2]
 
         if messageType not in ["b", "s"]:
             self.send("LINE", "RDM requires messageType 'b' or 's'")
-            self.log("SRM fail, incorrect messageType")
+            self.log("RDM fail, incorrect messageType")
             return
 
-    def doOUT(self, sendMessage=True):
+        timeFormat = "%d %b %Y %H:%M:%S"
+
+        try:
+            timestamp = datetime.strptime(timestampText, timeFormat)
+        except TypeError:
+            self.send("LINE", "RDM requires timestamp like '1 Jun 2022 21:39:04'")
+            self.log("RDM fail, incorrect timestamp format")
+            return
+
+        if messageType == "b":
+            messages = []
+            with open("messagelog.txt", "r") as file:
+                while True:
+                    line = file.readline()
+                    if not line:
+                        break
+                    messageTime = datetime.strptime(line.split("; ")[1], timeFormat)
+                    if messageTime > timestamp:
+                        messages.append(self.returnFormat(line))
+            
+            if len(messages) == 0:
+                self.send("LINE", f"No new messages since {timestampText}")
+                self.log(f"RDM success for {self.username}")
+                return
+
+            self.send("LINE", f"Broadcast messages since {timestampText}:")
+            self.log(f"Sending messages to {self.username}")
+            for message in messages:
+                self.send("LINE", message)
+                self.log(message)
+            self.log(f"RDM success for {self.username}")
+
+        else:
+            messages = {}
+            for roomId, members in srs.items():
+                if self.username not in members:
+                    continue
+                with open(f"SR_{roomId}_messagelog.txt", "r") as file:
+                    while True:
+                        line = file.readline()
+                        if not line:
+                            break
+                        messageTime = datetime.strptime(line.split("; ")[1], timeFormat)
+                        if messageTime > timestamp:
+                            messages.append(self.returnFormat(line))
+
+            if len(messages) == 0:
+                self.send("LINE", f"No new messages since {timestampText}")
+                self.log(f"RDM success for {self.username}")
+                return
+
+            self.send("LINE", f"Messages in seperate rooms since {timestampText}:")
+            self.log(f"Sending messages to {self.username}")
+            for roomId, messages in messages.items():
+                self.send(f"room-{roomId}:")
+                self.log(f"Sending messages from room-{roomId}")
+                for message in messages:
+                    self.send("LINE", "  " + message)
+                    self.log(message)
+            self.log(f"RDM success for {self.username}")
+
+    def doOUT(self, sendMessage=True, command=None):
+        if command != None and len(command.split()) != 1:
+            self.send("ERROR", "OUT requires no arguments")
+            self.log("OUT fail, incorrect usage")
+            return
+
         global invalidLogins
         invalidLogins[self.username] = 0
         global activeUsernames
