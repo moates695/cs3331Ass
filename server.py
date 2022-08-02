@@ -328,6 +328,11 @@ class ClientThread(Thread):
             self.log("SRM fail, incorrect usage")
             return
 
+        if not command.split()[1].isdigit():
+            self.send("ERROR", "SRM requires roomID as a digit")
+            self.log("SRM fail, incorrect usage")
+            return
+
         roomId = int(command.split()[1])
         message = " ".join(command.split()[2:])
 
@@ -341,26 +346,26 @@ class ClientThread(Thread):
             self.log(f"SRM fail, not member of room ID {roomId}")
             return
         
-        seqNum, string = self.append2Log(f"SR_{roomId}_messagelog.txt", False, command[4:])
+        seqNum, string = self.append2Log(f"SR_{roomId}_messagelog.txt", False, command[6:])
         self.send("LINE", f"SRS message #{seqNum} in room {roomId} at {string}")
         self.log(f"SRM success, message #{seqNum} in room {roomId}")
 
-    def returnFormat(line):
+    def returnFormat(self, line):
         split = line.split("; ")
         num = split[0]
         time = split[1]
         user = split[2]
-        message = split[3]
+        message = split[3][:-1]
         return f"#{num}; {user}: {message} at {time}"
 
     def doRDM(self, command):
-        if len(command.split()) < 3:
+        if len(command.split()) < 6:
             self.send("ERROR", "RDM requires messageType and timestamp")
             self.log("RDM fail, incorrect usage")
             return
 
         messageType = command.split()[1]
-        timestampText = command.split()[2]
+        timestampText = " ".join(command.split()[2:])
 
         if messageType not in ["b", "s"]:
             self.send("LINE", "RDM requires messageType 'b' or 's'")
@@ -371,7 +376,7 @@ class ClientThread(Thread):
 
         try:
             timestamp = datetime.strptime(timestampText, timeFormat)
-        except TypeError:
+        except ValueError:
             self.send("LINE", "RDM requires timestamp like '1 Jun 2022 21:39:04'")
             self.log("RDM fail, incorrect timestamp format")
             return
@@ -400,10 +405,11 @@ class ClientThread(Thread):
             self.log(f"RDM success for {self.username}")
 
         else:
-            messages = {}
+            SRmessages = {}
             for roomId, members in srs.items():
                 if self.username not in members:
                     continue
+                SRmessages[roomId] = []
                 with open(f"SR_{roomId}_messagelog.txt", "r") as file:
                     while True:
                         line = file.readline()
@@ -411,17 +417,22 @@ class ClientThread(Thread):
                             break
                         messageTime = datetime.strptime(line.split("; ")[1], timeFormat)
                         if messageTime > timestamp:
-                            messages.append(self.returnFormat(line))
+                            SRmessages[roomId].append(self.returnFormat(line))
 
-            if len(messages) == 0:
+            for messages in SRmessages.values():
+                if len(messages) > 0:
+                    break
+            else:
                 self.send("LINE", f"No new messages since {timestampText}")
                 self.log(f"RDM success for {self.username}")
                 return
 
             self.send("LINE", f"Messages in seperate rooms since {timestampText}:")
             self.log(f"Sending messages to {self.username}")
-            for roomId, messages in messages.items():
-                self.send(f"room-{roomId}:")
+            for roomId, messages in SRmessages.items():
+                if len(messages) == 0:
+                    continue
+                self.send("LINE", f"room-{roomId}:")
                 self.log(f"Sending messages from room-{roomId}")
                 for message in messages:
                     self.send("LINE", "  " + message)
