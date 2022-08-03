@@ -514,11 +514,9 @@ class ClientThread(Thread):
                     presenterIP = split[3]
                     presenterPort = split[4]
 
-        self.send("UDP_CHECKFILE", filename)
-        #messageUDP = f"{filename} {audienceIP} {audiencePort} {presenterIP} {presenterPort}"
+        self.send("UDP", f"{filename} {audienceIP} {audiencePort}")
         """ self.send("UDP", "audience " + messageUDP)
         self.send("UDP", "presenter " + messageUDP) """
-        self.log(f"UDP initiated between Presenter {self.username} and Audience {user}")
         
 
 def fillInvalidLogins():

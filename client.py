@@ -14,6 +14,7 @@ from time import sleep
 # colour implementation from joeld https://stackoverflow.com/questions/287871/how-do-i-print-colored-text-to-the-terminal 
 WARNING = '\033[93m'
 ENDC = '\033[0m'
+chunkSize = 512
 
 class ClientThread(Thread):
     def __init__(self, clientSocket, clientPort):
@@ -38,18 +39,52 @@ class ClientThread(Thread):
                     print("  " + payload)
                 elif header == "ERROR":
                     print(f"{WARNING}  ERROR: " + payload +f"{ENDC}")
+                elif header == "UDP":
+                    filename = payload.split()[0]
+                    audienceIP = payload.split()[1]
+                    audiencePort = int(payload.split()[2])
+                    audienceAddr = (audienceIP, audiencePort)
+                    
+                    if filename not in [file for file in listdir()]:
+                        print(f"{WARNING}  UDP fail, file '{filename}' does not exist {ENDC}")
+                        continue
 
-class UDPThread(Thread):
-    def __init__(self, clientSocket, clientAddr):
+                    with open(filename, "rb") as file:
+                        data = file.read()
+
+                    print(len(data))
+
+                    presenterSocket = socket(AF_INET, SOCK_DGRAM)
+                    presenterSocket.connect(audienceAddr)
+
+                    chunkSize = 512
+                    for i in range(0, len(data), chunkSize):
+                        sleep(0.0005)
+                        if i + chunkSize >= len(data):
+                            chunk = data[i:]
+                        else:
+                            chunk = data[i:i+chunkSize]
+                        presenterSocket.sendto(chunk, audienceAddr)
+
+                    presenterSocket.sendto(f"{filename}".encode(), audienceAddr)
+
+                    presenterSocket.close()
+
+class AudienceThread(Thread):
+    def __init__(self, audienceSocket):
         Thread.__init__(self)
-        self.clientSocket = clientSocket
-        self.clientAddr = clientAddr
-        self.clientActive = True
-        self.username = None
-        print(f"+ Connection established with: {self.clientAddr[0]}")
+        self.audienceSocket = audienceSocket
 
     def run(self):
-        pass
+        data = []
+        while True:
+            chunk, presenterAddr = self.audienceSocket.recvfrom(512)
+            try: # structure taken from https://stackoverflow.com/a/34870210 
+                chunk = chunk.decode()
+            except (UnicodeDecodeError, AttributeError):
+                data.append(chunk)
+                continue
+            print(len(data))
 
 def main():
     if len(sys.argv) != 4:
@@ -69,9 +104,12 @@ def main():
     clientThread = ClientThread(clientSocket, clientPort)
     clientThread.start()
 
-    UDPSocket = socket(AF_INET, SOCK_DGRAM)
-    UDPSocket.bind((gethostbyname(gethostname()), clientPort))
-    udpThread = UDPThread(UDPSocket)
+    audienceSocket = socket(AF_INET, SOCK_DGRAM)
+    audienceSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    audienceSocket.bind((gethostbyname(gethostname()), clientPort))
+    audienceThread = AudienceThread(audienceSocket)
+    audienceThread.start()
+
 
     """ while True:
         data = clientSocket.recv(1024).decode()
