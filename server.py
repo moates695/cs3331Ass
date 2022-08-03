@@ -33,7 +33,7 @@ class BlockLoginThread(Thread):
         global invalidLogins
         sleep(10)
         invalidLogins[self.username] = 0
-        print(f"User login unblocked: {self.clientHost}")
+        print(f"  User login unblocked: {self.username}")
 
 class ClientThread(Thread):
     def __init__(self, clientSocket, clientAddr):
@@ -145,7 +145,6 @@ class ClientThread(Thread):
             message = "Enter one of the following commands (BCM, ATU, SRB, SRM, RDM, OUT): "
             if not self.send("INPUT", message):
                 break
-            print("here2")
             cmd = self.clientSocket.recv(1024).decode()
             if len(cmd.split()) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB", "SRM","RDM","OUT","UDP","REF"]:
                 self.send("ERROR", "Invalid command!")
@@ -177,7 +176,6 @@ class ClientThread(Thread):
                 self.log("Command selected 'UDP'")
                 self.doUDP(cmd)
             else:
-                print("here")
                 self.body()
 
     # send message and catch broken pipe
@@ -237,10 +235,11 @@ class ClientThread(Thread):
         if len(command.split()) <= 1:
             self.send("ERROR", "BCM requires a message body")
             self.log("BCM fail, no message body")
-            return      
-        seqNum, string = self.append2Log("messagelog.txt", False, command[4:])
+            return     
+        message = command[4:]
+        seqNum, string = self.append2Log("messagelog.txt", False, message)
         self.send("LINE", f"Broadcast message #{seqNum} at {string}")
-        self.log(f"BCM success, #{seqNum}")
+        self.log(f"BCM success, #{seqNum} '{message}'")
 
     def doATU(self, command):
         if len(command.split()) != 1:
@@ -263,11 +262,14 @@ class ClientThread(Thread):
 
         if len(users) == 0:
             self.send("LINE", "No other active users")
+            self.log("ATU success, no other active users")
         else:
             for user in users:
                 split = user[:-1].split("; ")
-                self.send("LINE", f"{split[2]} active since {split[1]} at {split[3]} with UDP port {split[4]}")
-            self.log("ATU success")
+                message = f"{split[2]} active since {split[1]} at {split[3]} with UDP port {split[4]}"
+                self.send("LINE", message)
+                self.log(f"")
+            self.log("ATU success, active users returned")
 
     def doSRB(self, command):
         global srs
@@ -326,7 +328,7 @@ class ClientThread(Thread):
         open(f"SR_{idrMax}_messagelog.txt", "w").close()
         message = f"Room ID: {idrMax} created with users: " + " ".join(givenUsernames)
         self.send("LINE", message)
-        self.log(f"SRB success, room ID {idrMax} created")
+        self.log(f"SRB success, room ID {idrMax} created with members {'  '.join(givenUsernames)}")
 
     def doSRM(self, command):
         if len(command.split()) < 3:
@@ -354,7 +356,7 @@ class ClientThread(Thread):
         
         seqNum, string = self.append2Log(f"SR_{roomId}_messagelog.txt", False, command[6:])
         self.send("LINE", f"SRS message #{seqNum} in room {roomId} at {string}")
-        self.log(f"SRM success, message #{seqNum} in room {roomId}")
+        self.log(f"SRM success, message #{seqNum} in room {roomId} '{command[6:]}'")
 
     def returnFormat(self, line):
         split = line.split("; ")
@@ -404,11 +406,11 @@ class ClientThread(Thread):
                 return
 
             self.send("LINE", f"Broadcast messages since {timestampText}:")
-            self.log(f"Sending messages to {self.username}")
+            self.log(f"  Sending messages to {self.username}", plain=True)
             for message in messages:
                 self.send("LINE", message)
-                self.log(message)
-            self.log(f"RDM success for {self.username}")
+                self.log("  "+message, plain=True)
+            self.log(f"RDM success")
 
         else:
             SRmessages = {}
@@ -434,16 +436,16 @@ class ClientThread(Thread):
                 return
 
             self.send("LINE", f"Messages in seperate rooms since {timestampText}:")
-            self.log(f"Sending messages to {self.username}")
+            self.log(f"  Sending messages to {self.username}", plain=True)
             for roomId, messages in SRmessages.items():
                 if len(messages) == 0:
                     continue
                 self.send("LINE", f"room-{roomId}:")
-                self.log(f"Sending messages from room-{roomId}")
+                self.log(f"  Sending messages from room-{roomId}", plain=True)
                 for message in messages:
                     self.send("LINE", "  " + message)
-                    self.log(message)
-            self.log(f"RDM success for {self.username}")
+                    self.log("  "+message, plain=True)
+            self.log(f"RDM success")
 
     def doOUT(self, sendMessage=True, command=None):
         if command != None and len(command.split()) != 1:
@@ -525,9 +527,6 @@ class ClientThread(Thread):
                     presenterPort = split[4]
 
         self.send("UDP", f"{filename} {audienceIP} {audiencePort} {self.username}")
-        """ self.send("UDP", "audience " + messageUDP)
-        self.send("UDP", "presenter " + messageUDP) """
-        
 
 def fillInvalidLogins():
     global invalidLogins
@@ -587,7 +586,6 @@ def main():
 
     serverSocket = socket(AF_INET, SOCK_STREAM)
     serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-    #serverSocket.setblocking(False)
     serverSocket.bind(serverAddr)
 
     printBreak()
