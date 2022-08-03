@@ -40,9 +40,11 @@ class ClientThread(Thread):
                 elif header == "ERROR":
                     print(f"{WARNING}  ERROR: " + payload +f"{ENDC}")
                 elif header == "UDP":
-                    filename = payload.split()[0]
-                    audienceIP = payload.split()[1]
-                    audiencePort = int(payload.split()[2])
+                    split = payload.split()
+                    filename = split[0]
+                    audienceIP = split[1]
+                    audiencePort = int(split[2])
+                    username =split[3]
                     audienceAddr = (audienceIP, audiencePort)
                     
                     if filename not in [file for file in listdir()]:
@@ -51,8 +53,6 @@ class ClientThread(Thread):
 
                     with open(filename, "rb") as file:
                         data = file.read()
-
-                    print(len(data))
 
                     presenterSocket = socket(AF_INET, SOCK_DGRAM)
                     presenterSocket.connect(audienceAddr)
@@ -66,9 +66,10 @@ class ClientThread(Thread):
                             chunk = data[i:i+chunkSize]
                         presenterSocket.sendto(chunk, audienceAddr)
 
-                    presenterSocket.sendto(f"{filename}".encode(), audienceAddr)
+                    presenterSocket.sendto(f"{filename} {username}".encode(), audienceAddr)
 
                     presenterSocket.close()
+                    print(f"  {filename} has been uploaded")
 
 class AudienceThread(Thread):
     def __init__(self, audienceSocket):
@@ -76,15 +77,20 @@ class AudienceThread(Thread):
         self.audienceSocket = audienceSocket
 
     def run(self):
-        data = []
+        dataChunks = []
         while True:
-            chunk, presenterAddr = self.audienceSocket.recvfrom(512)
-            try: # structure taken from https://stackoverflow.com/a/34870210 
-                chunk = chunk.decode()
+            chunk, presenterAddr = self.audienceSocket.recvfrom(chunkSize)
+            try: # try-except structure inspired from https://stackoverflow.com/a/34870210 
+                eof = chunk.decode()
             except (UnicodeDecodeError, AttributeError):
-                data.append(chunk)
+                dataChunks.append(chunk)
                 continue
-            print(len(data))
+
+            with open("_"+eof.split()[0], "ab") as file:
+                for dataChunk in dataChunks:
+                    file.write(dataChunk)
+            print(f"  Received {eof.split()[0]} from {eof.split()[1]}")
+                
 
 def main():
     if len(sys.argv) != 4:

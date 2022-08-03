@@ -514,7 +514,7 @@ class ClientThread(Thread):
                     presenterIP = split[3]
                     presenterPort = split[4]
 
-        self.send("UDP", f"{filename} {audienceIP} {audiencePort}")
+        self.send("UDP", f"{filename} {audienceIP} {audiencePort} {self.username}")
         """ self.send("UDP", "audience " + messageUDP)
         self.send("UDP", "presenter " + messageUDP) """
         
