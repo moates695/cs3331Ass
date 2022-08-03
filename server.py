@@ -172,7 +172,8 @@ class ClientThread(Thread):
                 self.doOUT(command=cmd)
                 return
             else:
-                self.doUDP()
+                self.log("Command selected 'UDP'")
+                self.doUDP(cmd)
 
     # send message and catch broken pipe
     def send(self, cmd, message):
@@ -229,7 +230,7 @@ class ClientThread(Thread):
 
     def doBCM(self, command):
         if len(command.split()) <= 1:
-            self.send("LINE", "BCM requires a message body")
+            self.send("ERROR", "BCM requires a message body")
             self.log("BCM fail, no message body")
             return      
         seqNum, string = self.append2Log("messagelog.txt", False, command[4:])
@@ -238,7 +239,7 @@ class ClientThread(Thread):
 
     def doATU(self, command):
         if len(command.split()) != 1:
-            self.send("LINE", "ATU has no arguments")
+            self.send("ERROR", "ATU has no arguments")
             self.log("ATU fail, arguments provided")
             return
         users = []
@@ -266,17 +267,17 @@ class ClientThread(Thread):
     def doSRB(self, command):
         global srs
         if len(command.split()) == 1:
-            self.send("LINE", "SRB requires usernames")
+            self.send("ERROR", "SRB requires usernames")
             self.log("SRB fail, no usernames")
             return 
         givenUsernames = command.split()[1:]
         if self.username in givenUsernames:
-            self.send("LINE", "SRB cannot contain your username")
+            self.send("ERROR", "SRB cannot contain your username")
             self.log("SRB fail, provided own username")
             return
         givenUsernames.append(self.username)
         if len(set(givenUsernames)) != len(givenUsernames):
-            self.send("LINE", "SRB cannot have duplicate usernames")
+            self.send("ERROR", "SRB cannot have duplicate usernames")
             self.log("SRB fail, duplicate usernames")
             return
 
@@ -368,7 +369,7 @@ class ClientThread(Thread):
         timestampText = " ".join(command.split()[2:])
 
         if messageType not in ["b", "s"]:
-            self.send("LINE", "RDM requires messageType 'b' or 's'")
+            self.send("ERROR", "RDM requires messageType 'b' or 's'")
             self.log("RDM fail, incorrect messageType")
             return
 
@@ -377,7 +378,7 @@ class ClientThread(Thread):
         try:
             timestamp = datetime.strptime(timestampText, timeFormat)
         except ValueError:
-            self.send("LINE", "RDM requires timestamp like '1 Jun 2022 21:39:04'")
+            self.send("ERROR", "RDM requires timestamp like '1 Jun 2022 21:39:04'")
             self.log("RDM fail, incorrect timestamp format")
             return
 
@@ -481,8 +482,44 @@ class ClientThread(Thread):
         
         self.log("User logged out", logout=True)
 
-    def doUDP(self):
-        pass
+    def doUDP(self, command):
+        if len(command.split()) != 3:
+            self.send("ERROR", "UDP requires username and filename")
+            self.log("UDP fail, incorrect usage")
+            return
+
+        user = command.split()[1]
+        filename = command.split()[2]
+
+        if user == self.username:
+            self.send("ERROR", f"UDP username cannot be your own")
+            self.log(f"UDP fail, {self.username} supplied own username")
+            return
+
+        if user not in activeUsernames:
+            self.send("LINE", f"{user} is offline")
+            self.log(f"UDP fail, {user} is offline")
+            return
+
+        with open("userlog.txt") as file:
+            while True:
+                line = file.readline()
+                if not line:
+                    break
+                split = line.split("; ")
+                if split[2] == user:
+                    audienceIP = split[3]
+                    audiencePort = split[4]
+                elif split[2] == self.username:
+                    presenterIP = split[3]
+                    presenterPort = split[4]
+
+        self.send("UDP_CHECKFILE", filename)
+        #messageUDP = f"{filename} {audienceIP} {audiencePort} {presenterIP} {presenterPort}"
+        """ self.send("UDP", "audience " + messageUDP)
+        self.send("UDP", "presenter " + messageUDP) """
+        self.log(f"UDP initiated between Presenter {self.username} and Audience {user}")
+        
 
 def fillInvalidLogins():
     global invalidLogins
