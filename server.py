@@ -171,7 +171,7 @@ class ClientThread(Thread):
                 self.log("Command selected 'OUT'")
                 self.doOUT(command=cmd)
                 return
-            else:
+            elif cmd.split()[0] == "UDP":
                 self.log("Command selected 'UDP'")
                 self.doUDP(cmd)
 

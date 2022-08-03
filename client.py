@@ -72,9 +72,10 @@ class ClientThread(Thread):
                     print(f"  {filename} has been uploaded")
 
 class AudienceThread(Thread):
-    def __init__(self, audienceSocket):
+    def __init__(self, audienceSocket, clientSocket):
         Thread.__init__(self)
         self.audienceSocket = audienceSocket
+        self.clientSocket = clientSocket
 
     def run(self):
         dataChunks = []
@@ -86,11 +87,17 @@ class AudienceThread(Thread):
                 dataChunks.append(chunk)
                 continue
 
-            with open("_"+eof.split()[0], "ab") as file:
+            print()
+            if eof.split()[0] in [file for file in listdir()]:
+                        print(f"  received {eof.split()[0]} but it already exists")
+                        continue
+
+            with open(eof.split()[0], "ab") as file:
                 for dataChunk in dataChunks:
                     file.write(dataChunk)
-            print(f"  Received {eof.split()[0]} from {eof.split()[1]}")
-                
+            print(f"  Received {eof.split()[0]} from {eof.split()[1]}")   
+            self.clientSocket.send("NEW".encode())
+
 
 def main():
     if len(sys.argv) != 4:
