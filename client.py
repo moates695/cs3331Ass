@@ -16,6 +16,19 @@ WARNING = '\033[93m'
 ENDC = '\033[0m'
 chunkSize = 512
 
+#reset = False
+
+class InputThread(Thread):
+    def __init__(self, clientSocket, payload):
+        Thread.__init__(self)
+        self.clientSocket = clientSocket
+        self.payload = payload
+    
+    def run(self):
+        global reset
+        self.clientSocket.send(input("> " + self.payload).encode())
+        reset = True
+
 class ClientThread(Thread):
     def __init__(self, clientSocket, clientPort):
         Thread.__init__(self)
@@ -29,6 +42,16 @@ class ClientThread(Thread):
                 header, payload = splitMessage(d)
                 
                 if header == "INPUT":
+                    #inputThread = InputThread(self.clientSocket, payload)
+                    #inputThread.start()
+                    """ while True:
+                        sleep(0.01)
+                        global reset
+                        if reset:
+                            inputThread.join()
+                            reset = False
+                            print("HERE3")
+                            break """
                     self.clientSocket.send(input("> " + payload).encode())
                 elif header == "COMMAND":
                     if payload == "killClient":
@@ -78,6 +101,8 @@ class AudienceThread(Thread):
         self.clientSocket = clientSocket
 
     def run(self):
+        #global reset
+
         dataChunks = []
         while True:
             chunk, presenterAddr = self.audienceSocket.recvfrom(chunkSize)
@@ -89,14 +114,19 @@ class AudienceThread(Thread):
 
             print()
             if eof.split()[0] in [file for file in listdir()]:
-                        print(f"  received {eof.split()[0]} but it already exists")
-                        continue
+                print(f"  received {eof.split()[0]} but it already exists\n"+ "> " + "Enter one of the following commands (BCM, ATU, SRB, SRM, RDM, OUT): ", end="")
+                #print("> " + "Enter one of the following commands (BCM, ATU, SRB, SRM, RDM, OUT): ", end="")
+                #reset = True
+                #self.clientSocket.send("REF".encode())
+                continue
 
             with open(eof.split()[0], "ab") as file:
                 for dataChunk in dataChunks:
                     file.write(dataChunk)
             print(f"  Received {eof.split()[0]} from {eof.split()[1]}")   
-            self.clientSocket.send("NEW".encode())
+            #reset = True
+            print("> " + "Enter one of the following commands (BCM, ATU, SRB, SRM, RDM, OUT): ")
+            #self.clientSocket.send("REF".encode())
 
 
 def main():
@@ -120,10 +150,67 @@ def main():
     audienceSocket = socket(AF_INET, SOCK_DGRAM)
     audienceSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     audienceSocket.bind((gethostbyname(gethostname()), clientPort))
-    audienceThread = AudienceThread(audienceSocket)
+    audienceThread = AudienceThread(audienceSocket, clientSocket)
     audienceThread.start()
 
+    """ while True:
+            data = clientSocket.recv(1024).decode()
+            for d in data.split('|'):
+                header, payload = splitMessage(d)
+                
+                if header == "INPUT":
+                    inputThread = InputThread(clientSocket, payload)
+                    inputThread.start()
+                    while True:
+                        sleep(0.01)
+                        global reset
+                        if reset:
+                            inputThread.join()
+                            reset = False
+                            print("HERE3")
+                            break
+                    #self.clientSocket.send(input("> " + payload).encode())
+                elif header == "COMMAND":
+                    if payload == "killClient":
+                        exit()
+                    elif payload == "sendUDPSocket":
+                        clientSocket.send(str(clientPort).encode())
+                elif header == "LINE":
+                    print("  " + payload)
+                elif header == "ERROR":
+                    print(f"{WARNING}  ERROR: " + payload +f"{ENDC}")
+                elif header == "UDP":
+                    split = payload.split()
+                    filename = split[0]
+                    audienceIP = split[1]
+                    audiencePort = int(split[2])
+                    username =split[3]
+                    audienceAddr = (audienceIP, audiencePort)
+                    
+                    if filename not in [file for file in listdir()]:
+                        print(f"{WARNING}  UDP fail, file '{filename}' does not exist {ENDC}")
+                        continue
 
+                    with open(filename, "rb") as file:
+                        data = file.read()
+
+                    presenterSocket = socket(AF_INET, SOCK_DGRAM)
+                    presenterSocket.connect(audienceAddr)
+
+                    chunkSize = 512
+                    for i in range(0, len(data), chunkSize):
+                        sleep(0.0005)
+                        if i + chunkSize >= len(data):
+                            chunk = data[i:]
+                        else:
+                            chunk = data[i:i+chunkSize]
+                        presenterSocket.sendto(chunk, audienceAddr)
+
+                    presenterSocket.sendto(f"{filename} {username}".encode(), audienceAddr)
+
+                    presenterSocket.close()
+                    print(f"  {filename} has been uploaded")
+ """
     """ while True:
         data = clientSocket.recv(1024).decode()
         for d in data.split('|'):

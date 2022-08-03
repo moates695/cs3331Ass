@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Version: Python 3.9.2
 Author: Marcus Oates z5257541
@@ -144,8 +145,9 @@ class ClientThread(Thread):
             message = "Enter one of the following commands (BCM, ATU, SRB, SRM, RDM, OUT): "
             if not self.send("INPUT", message):
                 break
+            print("here2")
             cmd = self.clientSocket.recv(1024).decode()
-            if len(cmd.split()) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB", "SRM","RDM","OUT","UDP"]:
+            if len(cmd.split()) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB", "SRM","RDM","OUT","UDP","REF"]:
                 self.send("ERROR", "Invalid command!")
                 if len(cmd.split()) == 0:
                     self.log(f"No command selected")
@@ -174,6 +176,9 @@ class ClientThread(Thread):
             elif cmd.split()[0] == "UDP":
                 self.log("Command selected 'UDP'")
                 self.doUDP(cmd)
+            else:
+                print("here")
+                self.body()
 
     # send message and catch broken pipe
     def send(self, cmd, message):
@@ -494,6 +499,11 @@ class ClientThread(Thread):
         if user == self.username:
             self.send("ERROR", f"UDP username cannot be your own")
             self.log(f"UDP fail, {self.username} supplied own username")
+            return
+
+        if user not in allUsernames:
+            self.send("LINE", f"{user} does not exist")
+            self.log(f"UDP fail, {user} does not exist")
             return
 
         if user not in activeUsernames:
