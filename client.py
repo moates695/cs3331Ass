@@ -11,7 +11,7 @@ from threading import Thread
 from os import listdir
 from time import sleep
 
-# colour implementation from joeld https://stackoverflow.com/questions/287871/how-do-i-print-colored-text-to-the-terminal 
+# colour implementation from joeld https://stackoverflow.com/a/287944 
 WARNING = '\033[93m'
 ENDC = '\033[0m'
 chunkSize = 512
@@ -106,9 +106,11 @@ def main():
                 # read binary data
                 with open(filename, "rb") as file:
                     data = file.read()
+                
                 # initiate presenter UDP socket
                 presenterSocket = socket(AF_INET, SOCK_DGRAM)
                 presenterSocket.connect(audienceAddr)
+                
                 # send data chunks
                 chunkSize = 512
                 for i in range(0, len(data), chunkSize):
@@ -118,6 +120,7 @@ def main():
                     else:
                         chunk = data[i:i+chunkSize]
                     presenterSocket.sendto(chunk, audienceAddr)
+                
                 # send EOF message
                 presenterSocket.sendto(f"{filename} {username}".encode(), audienceAddr)
 

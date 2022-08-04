@@ -44,7 +44,7 @@ class ClientThread(Thread):
         self.clientAddr = clientAddr
         self.clientActive = True
         self.username = None
-        print(f"+ Connection established with: {self.clientAddr[0]}")
+        self.log("Connection established")
 
     def run(self):
         if self.login():
@@ -111,7 +111,7 @@ class ClientThread(Thread):
                 self.send("COMMAND", "sendUDPSocket")
                 clientPort = int(self.clientSocket.recv(1024).decode())
                 self.append2Log("userlog.txt", False, clientPort)
-                self.log("User login processed")
+                self.log(f"{self.username} login processed")
                 self.send("LINE", "Welcome to Toom!")
                 return True
             
@@ -119,7 +119,7 @@ class ClientThread(Thread):
             else:
                 invalidLogins[self.username] += 1
                 self.log("Invalid password entered")
-                
+                # begin login blocking thread if attempts reached
                 if invalidLogins[self.username] == attempts:
                     message = "Invalid Password. Your account has been blocked. Please try again later"
                     self.send("LINE", message)
@@ -248,6 +248,7 @@ class ClientThread(Thread):
             self.log("BCM fail, no message body")
             return     
 
+        # append message to log and send response to client
         message = command[4:]
         seqNum, string = self.append2Log("messagelog.txt", False, message)
         self.send("LINE", f"Broadcast message #{seqNum} at {string}")
@@ -261,6 +262,7 @@ class ClientThread(Thread):
             self.log("ATU fail, arguments provided")
             return
         
+        # retrieve active user data from userlog
         users = []
         try:
             with open("userlog.txt", "r") as file:
@@ -275,9 +277,11 @@ class ClientThread(Thread):
             self.log("Cannot open userlog.txt")
             return
 
+        # no other active users
         if len(users) == 0:
             self.send("LINE", "No other active users")
             self.log("ATU success, no other active users")
+        # other active users exist
         else:
             for user in users:
                 split = user[:-1].split("; ")
@@ -295,27 +299,32 @@ class ClientThread(Thread):
             self.log("SRB fail, no usernames")
             return 
         givenUsernames = command.split()[1:]
+        # given clients own username
         if self.username in givenUsernames:
             self.send("ERROR", "SRB cannot contain your username")
             self.log("SRB fail, provided own username")
             return
         givenUsernames.append(self.username)
+        # duplicate usernames given
         if len(set(givenUsernames)) != len(givenUsernames):
             self.send("ERROR", "SRB cannot have duplicate usernames")
             self.log("SRB fail, duplicate usernames")
             return
 
+        # check if room already exists
         for idr, room in srs.items():
             if len(room) != len(givenUsernames):
                 continue
             for user in  givenUsernames:
                 if user not in room:
                     break
+            # room already exists
             else:
                 self.send("LINE", f"SRB room already exists ID: {idr}")
                 self.log(f"SRB fail, room already exists ID: {idr}")
                 return
 
+        # check if given users exist and are online
         invalid = []
         offline = []
         for username in givenUsernames:
@@ -326,6 +335,7 @@ class ClientThread(Thread):
                 offline.append(username)
                 continue
 
+        # portion of given users may be offline or non-existant
         if len(invalid) != 0 or len(offline) != 0:
             message = "The following errors occurred:\n"
             for user in invalid:
@@ -336,6 +346,7 @@ class ClientThread(Thread):
             self.log("SRB fail, invalid usernames provided")
             return
 
+        # create room building
         idrMax = 0
         for idr in srs.keys():
             if idrMax < idr:
@@ -355,6 +366,7 @@ class ClientThread(Thread):
             self.log("SRM fail, incorrect usage")
             return
 
+        # roomID must be a digit
         if not command.split()[1].isdigit():
             self.send("ERROR", "SRM requires roomID as a digit")
             self.log("SRM fail, incorrect usage")
@@ -363,11 +375,13 @@ class ClientThread(Thread):
         roomId = int(command.split()[1])
         message = " ".join(command.split()[2:])
 
+        # no room with roomID exists
         if roomId not in srs.keys():
             self.send("LINE", f"Room ID {roomId} does not exist")
             self.log(f"SRM fail, invalid room ID {roomId}")
             return
 
+        # client is not a member of the room
         if self.username not in srs[roomId]:
             self.send("LINE", f"You are not a member of room ID {roomId}")
             self.log(f"SRM fail, not member of room ID {roomId}")
