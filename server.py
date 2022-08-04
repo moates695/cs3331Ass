@@ -62,18 +62,14 @@ class ClientThread(Thread):
         
         try:
             with open("credentials.txt", "r") as file:
-                if self.readCredentials(file, password):
+                return self.readCredentials(file, password)
+                """ if self.readCredentials(file, password):
                     # user is not already logged in
                     if self.username not in activeUsernames:
                         activeUsernames.append(self.username)
                         return True
-                    # user already logged in
-                    else:
-                        self.send("LINE", f"{self.username} is already logged in")
-                        self.log(f"Login rejected, {self.username} already logged in")
-                        return False
                 else:
-                    return False       
+                    return False  """      
         except IOError as e:
             if e.errno != errno.EPIPE:
                 print("Could not open credentials.txt")
@@ -84,6 +80,8 @@ class ClientThread(Thread):
             return self.login()
 
     def readCredentials(self, file, password):
+        global activeUsernames
+
         while True:
             line = file.readline()
 
@@ -97,6 +95,13 @@ class ClientThread(Thread):
             if line.split()[0] != self.username:
                 continue
             
+            # user already logged in
+            if line.split()[0] in activeUsernames:
+                self.send("LINE", "Already logged in")
+                self.log("Login fail, already logged in")
+                self.send("COMMAND", "killClient")
+                return False
+
             # user is currently locked out
             if invalidLogins[self.username] == attempts:
                 message = "Your account is blocked due to multiple login failures. Please try again later"
@@ -104,15 +109,16 @@ class ClientThread(Thread):
                 self.log("Login attempt while blocked")
                 self.send("COMMAND", "killClient")
                 return False
-            
+
             # password is valid
             if line.split()[1] == password:
                 invalidLogins[self.username] = 0
                 self.send("COMMAND", "sendUDPSocket")
                 clientPort = int(self.clientSocket.recv(1024).decode())
                 self.append2Log("userlog.txt", False, clientPort)
-                self.log(f"{self.username} login processed")
+                self.log(f"Login processed", login=True)
                 self.send("LINE", "Welcome to Toom!")
+                activeUsernames.append(self.username)
                 return True
             
             # password is invalid
@@ -283,12 +289,13 @@ class ClientThread(Thread):
             self.log("ATU success, no other active users")
         # other active users exist
         else:
+            activeUsers = []
             for user in users:
                 split = user[:-1].split("; ")
                 message = f"{split[2]} active since {split[1]} at {split[3]} with UDP port {split[4]}"
                 self.send("LINE", message)
-                self.log(f"")
-            self.log("ATU success, active users returned")
+                activeUsers.append(split[2])
+            self.log(f"ATU success, send active users; {', '.join(activeUsers)}")
 
     # seperate room building
     def doSRB(self, command):
@@ -342,7 +349,7 @@ class ClientThread(Thread):
                 message += f"   {user} does not exist\n"
             for user in offline:
                 message += f"   {user} is offline\n"
-            self.send("LINE", message[:-1])
+            self.send("ERROR", message[:-1])
             self.log("SRB fail, invalid usernames provided")
             return
 
@@ -387,6 +394,7 @@ class ClientThread(Thread):
             self.log(f"SRM fail, not member of room ID {roomId}")
             return
         
+        # add messages to seperate room building
         seqNum, string = self.append2Log(f"SR_{roomId}_messagelog.txt", False, command[6:])
         self.send("LINE", f"SRS message #{seqNum} in room {roomId} at {string}")
         self.log(f"SRM success, message #{seqNum} in room {roomId} '{command[6:]}'")
@@ -411,6 +419,7 @@ class ClientThread(Thread):
         messageType = command.split()[1]
         timestampText = " ".join(command.split()[2:])
 
+        # incorrect messageType given
         if messageType not in ["b", "s"]:
             self.send("ERROR", "RDM requires messageType 'b' or 's'")
             self.log("RDM fail, incorrect messageType")
@@ -418,6 +427,7 @@ class ClientThread(Thread):
 
         timeFormat = "%d %b %Y %H:%M:%S"
 
+        # timestamp must be in specified format
         try:
             timestamp = datetime.strptime(timestampText, timeFormat)
         except ValueError:
@@ -425,7 +435,9 @@ class ClientThread(Thread):
             self.log("RDM fail, incorrect timestamp format")
             return
 
+        # read broadcast messages
         if messageType == "b":
+            # retrieve all broadcast messages
             messages = []
             with open("messagelog.txt", "r") as file:
                 while True:
@@ -436,19 +448,22 @@ class ClientThread(Thread):
                     if messageTime > timestamp:
                         messages.append(self.returnFormat(line))
             
+            # no new messages
             if len(messages) == 0:
                 self.send("LINE", f"No new messages since {timestampText}")
                 self.log(f"RDM success for {self.username}")
                 return
 
+            # send new messages to client
             self.send("LINE", f"Broadcast messages since {timestampText}:")
             self.log(f"  Sending messages to {self.username}", plain=True)
             for message in messages:
                 self.send("LINE", message)
                 self.log("  "+message, plain=True)
             self.log(f"RDM success")
-
+        # read seperate room building messages
         else:
+            # retrieve messages after given time from all client member rooms
             SRmessages = {}
             for roomId, members in srs.items():
                 if self.username not in members:
@@ -466,11 +481,13 @@ class ClientThread(Thread):
             for messages in SRmessages.values():
                 if len(messages) > 0:
                     break
+            # no new messages in any client member room
             else:
                 self.send("LINE", f"No new messages since {timestampText}")
                 self.log(f"RDM success for {self.username}")
                 return
 
+            # send new messages per room to client
             self.send("LINE", f"Messages in seperate rooms since {timestampText}:")
             self.log(f"  Sending messages to {self.username}", plain=True)
             for roomId, messages in SRmessages.items():
@@ -496,6 +513,7 @@ class ClientThread(Thread):
         global activeUsernames
         activeUsernames.remove(self.username)
 
+        # update userlog active user sequence numbers
         entrys = []
         shift = False
         try:
@@ -509,6 +527,8 @@ class ClientThread(Thread):
                         continue
                     if not shift:
                         entrys.append(line)
+                    # entrys after client receive updated 
+                    # active user sequence numbers
                     else:   
                         entrys.append(str(int(line[0])-1)+line[1:])            
             with open("userlog.txt", "w") as file:
@@ -538,21 +558,25 @@ class ClientThread(Thread):
         user = command.split()[1]
         filename = command.split()[2]
 
+        # given clients own username
         if user == self.username:
             self.send("ERROR", f"UDP username cannot be your own")
             self.log(f"UDP fail, {self.username} supplied own username")
             return
 
+        # given user does not exist
         if user not in allUsernames:
             self.send("LINE", f"{user} does not exist")
             self.log(f"UDP fail, {user} does not exist")
             return
 
+        # given user is not active
         if user not in activeUsernames:
             self.send("LINE", f"{user} is offline")
             self.log(f"UDP fail, {user} is offline")
             return
 
+        # retrieve audience data
         with open("userlog.txt") as file:
             while True:
                 line = file.readline()
@@ -566,6 +590,7 @@ class ClientThread(Thread):
                     presenterIP = split[3]
                     presenterPort = split[4]
 
+        # send audience data to client in UDP command
         self.send("UDP", f"{filename} {audienceIP} {audiencePort} {self.username}")
 
 # initialise invalid logins dictionary
