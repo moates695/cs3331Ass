@@ -20,9 +20,11 @@ allUsernames = []
 activeUsernames = []
 srs = {}
 
+# print horizontal breakline
 def printBreak():
     print(f"{'='*40}")
 
+# block user login for 10 seconds
 class BlockLoginThread(Thread):
     def __init__(self, username, clientHost):
         Thread.__init__(self)
@@ -51,19 +53,25 @@ class ClientThread(Thread):
     def login(self):
         global invalidLogins
         global allUsernames
-
+        # username prompt
         self.clientSocket.send("INPUT~Username: ".encode())
         self.username = self.clientSocket.recv(1024).decode()
-
+        # password prompt
         self.clientSocket.send("INPUT~Password: ".encode())
         password = self.clientSocket.recv(1024).decode()
         
         try:
             with open("credentials.txt", "r") as file:
-                if self.readFile(file, password):
+                if self.readCredentials(file, password):
+                    # user is not already logged in
                     if self.username not in activeUsernames:
                         activeUsernames.append(self.username)
-                    return True
+                        return True
+                    # user already logged in
+                    else:
+                        self.send("LINE", f"{self.username} is already logged in")
+                        self.log(f"Login rejected, {self.username} already logged in")
+                        return False
                 else:
                     return False       
         except IOError as e:
@@ -75,11 +83,11 @@ class ClientThread(Thread):
             self.log("Username has no associated password")
             return self.login()
 
-    def readFile(self, file, password):
+    def readCredentials(self, file, password):
         while True:
             line = file.readline()
 
-            # username does not exist
+            # reached EOF, given username does not exist
             if not line:
                 self.send("LINE", "Username does not exist")
                 self.log("Invalid username provided")
@@ -125,6 +133,7 @@ class ClientThread(Thread):
                 self.send("LINE", "Invalid Password. Please try again")
                 return self.login()
 
+    # print message to server log
     def log(self, message, login=False, logout=False, plain=False):
         if login:
             message = "+ " + message
@@ -140,13 +149,14 @@ class ClientThread(Thread):
             else:
                 print(f"{message}: {self.username} at {datetime.now().strftime('%H:%M:%S %-d/%m/%Y')}")
 
+    # prompt loop
     def body(self):
         while True:
             message = "Enter one of the following commands (BCM, ATU, SRB, SRM, RDM, OUT): "
             if not self.send("INPUT", message):
                 break
             cmd = self.clientSocket.recv(1024).decode()
-            if len(cmd.split()) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB", "SRM","RDM","OUT","UDP","REF"]:
+            if len(cmd.split()) == 0 or cmd.split()[0] not in ["BCM","ATU","SRB", "SRM","RDM","OUT","UDP"]:
                 self.send("ERROR", "Invalid command!")
                 if len(cmd.split()) == 0:
                     self.log(f"No command selected")
@@ -172,11 +182,9 @@ class ClientThread(Thread):
                 self.log("Command selected 'OUT'")
                 self.doOUT(command=cmd)
                 return
-            elif cmd.split()[0] == "UDP":
+            else:
                 self.log("Command selected 'UDP'")
                 self.doUDP(cmd)
-            else:
-                self.body()
 
     # send message and catch broken pipe
     def send(self, cmd, message):
@@ -191,6 +199,7 @@ class ClientThread(Thread):
                 return False    
         return True      
 
+    # read file and retrieve sequence number
     def getSeqNum(self, filename, tried=False):
         try:
             seqNum = 1
@@ -202,7 +211,6 @@ class ClientThread(Thread):
                     seqNum += 1  
         except IOError:
             open(filename, "w").close()
-            #print(f"Could not open {filename}")
             chmod(filename, 0o777)
             if not tried:
                 return self.getSeqNum(filename, true)
@@ -210,6 +218,7 @@ class ClientThread(Thread):
                 return -1
         return seqNum
     
+    # append given message to the given file
     def append2Log(self, filename, tried, *argv):
         seqNum = self.getSeqNum(filename)
         string = datetime.now().strftime("%-d %b %Y %H:%M:%S")
@@ -231,21 +240,27 @@ class ClientThread(Thread):
             self.append2Log(filename, True, *argv)
         return seqNum, string
 
+    # broadcast message
     def doBCM(self, command):
+        # incorrect usage
         if len(command.split()) <= 1:
             self.send("ERROR", "BCM requires a message body")
             self.log("BCM fail, no message body")
             return     
+
         message = command[4:]
         seqNum, string = self.append2Log("messagelog.txt", False, message)
         self.send("LINE", f"Broadcast message #{seqNum} at {string}")
         self.log(f"BCM success, #{seqNum} '{message}'")
 
+    # download active users
     def doATU(self, command):
+        # incorrect usage
         if len(command.split()) != 1:
             self.send("ERROR", "ATU has no arguments")
             self.log("ATU fail, arguments provided")
             return
+        
         users = []
         try:
             with open("userlog.txt", "r") as file:
@@ -271,8 +286,10 @@ class ClientThread(Thread):
                 self.log(f"")
             self.log("ATU success, active users returned")
 
+    # seperate room building
     def doSRB(self, command):
         global srs
+        # incorrect usage
         if len(command.split()) == 1:
             self.send("ERROR", "SRB requires usernames")
             self.log("SRB fail, no usernames")
@@ -330,7 +347,9 @@ class ClientThread(Thread):
         self.send("LINE", message)
         self.log(f"SRB success, room ID {idrMax} created with members {'  '.join(givenUsernames)}")
 
+    # seperate room message
     def doSRM(self, command):
+        # incorrect usage
         if len(command.split()) < 3:
             self.send("ERROR", "SRM requires roomID and message")
             self.log("SRM fail, incorrect usage")
@@ -358,6 +377,7 @@ class ClientThread(Thread):
         self.send("LINE", f"SRS message #{seqNum} in room {roomId} at {string}")
         self.log(f"SRM success, message #{seqNum} in room {roomId} '{command[6:]}'")
 
+    # return augmented message format
     def returnFormat(self, line):
         split = line.split("; ")
         num = split[0]
@@ -366,7 +386,9 @@ class ClientThread(Thread):
         message = split[3][:-1]
         return f"#{num}; {user}: {message} at {time}"
 
+    # read messages
     def doRDM(self, command):
+        # incorrect usage
         if len(command.split()) < 6:
             self.send("ERROR", "RDM requires messageType and timestamp")
             self.log("RDM fail, incorrect usage")
@@ -447,7 +469,9 @@ class ClientThread(Thread):
                     self.log("  "+message, plain=True)
             self.log(f"RDM success")
 
+    # logout
     def doOUT(self, sendMessage=True, command=None):
+        # incorrect usage
         if command != None and len(command.split()) != 1:
             self.send("ERROR", "OUT requires no arguments")
             self.log("OUT fail, incorrect usage")
@@ -489,7 +513,9 @@ class ClientThread(Thread):
         
         self.log("User logged out", logout=True)
 
+    # upload file
     def doUDP(self, command):
+        # incorrect usage
         if len(command.split()) != 3:
             self.send("ERROR", "UDP requires username and filename")
             self.log("UDP fail, incorrect usage")
@@ -528,6 +554,7 @@ class ClientThread(Thread):
 
         self.send("UDP", f"{filename} {audienceIP} {audiencePort} {self.username}")
 
+# initialise invalid logins dictionary
 def fillInvalidLogins():
     global invalidLogins
     try:
@@ -541,6 +568,7 @@ def fillInvalidLogins():
         print("Could not open credentials.txt")
         exit()
 
+# retrieve all usernames from credentials.txt
 def findUsernames():
     global allUsernames
     try:
@@ -553,6 +581,7 @@ def findUsernames():
     except IOError:
         return
 
+# wipe all server fies
 def flush():
     open("userlog.txt", "w").close()
     open("messagelog.txt", "w").close()
@@ -564,6 +593,7 @@ def flush():
 def main():
     global attempts
 
+    # incorrect usage
     if len(sys.argv) != 3:
         print("Usage: server.py [serverPort] [attempts]")
         return
@@ -572,6 +602,7 @@ def main():
     findUsernames()
     flush()
 
+    # retrieve server host, port number and attempts
     serverHost = gethostbyname(gethostname())
     serverPort = int(sys.argv[1])
     checkPortNumber(serverPort)
@@ -584,6 +615,7 @@ def main():
     except ValueError:
         print("Error: attempt limit must be integer value")
 
+    # create server socket and bind to host IP
     serverSocket = socket(AF_INET, SOCK_STREAM)
     serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     serverSocket.bind(serverAddr)
@@ -596,6 +628,7 @@ def main():
     print("Waiting for connection requests...")
     printBreak()
 
+    # listen for client connections, create new threads
     while True:
         serverSocket.listen()
         clientSocket, clientAddr = serverSocket.accept()
